@@ -1,0 +1,13 @@
+langchain
+langchain-community
+langchain-ollama
+faiss-cpu
+ollama
+fastapi
+uvicorn
+streamlit
+python-multipart
+pypdf
+requests
+pytesseract
+Pillow

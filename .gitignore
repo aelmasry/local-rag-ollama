@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+
+# Local data & indexes (rebuild after clone)
+vectorstore/
+data/uploads/
+data/faiss_index/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Logs / env
+.env
+.env.*
+*.log
+
+# Streamlit
+.streamlit/secrets.toml

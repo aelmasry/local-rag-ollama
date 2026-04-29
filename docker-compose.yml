@@ -1,0 +1,37 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  backend:
+    build: .
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - LLM_MODEL=llama3
+      - EMBED_MODEL=nomic-embed-text
+    ports:
+      # Host 8010 avoids clashing with Laravel/PHP or other apps on :8000
+      - "8010:8000"
+    volumes:
+      - ./data:/app/data
+      - ./vectorstore:/app/vectorstore
+    depends_on:
+      - ollama
+
+  ui:
+    build: .
+    command: streamlit run ui/app.py --server.port 8501 --server.address 0.0.0.0
+    environment:
+      - PYTHONUNBUFFERED=1
+      - API_BASE_URL=http://backend:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+
+volumes:
+  ollama_data:

@@ -1,0 +1,52 @@
+[
+  {
+    "id": 1,
+    "title": "Ollama Local Setup",
+    "owner": "Ali",
+    "tags": ["llm", "local", "rag"],
+    "details": {
+      "status": "completed",
+      "notes": "Install ollama and pull llama3 and nomic-embed-text."
+    }
+  },
+  {
+    "id": 2,
+    "title": "RAG Pipeline",
+    "owner": "Ali",
+    "tags": ["langchain", "faiss"],
+    "details": {
+      "status": "in_progress",
+      "notes": "Load JSON, split chunks, build FAISS index, and answer with citations."
+    }
+  },
+  {
+    "id": 3,
+    "title": "RAG Pipeline",
+    "owner": "Benjamin",
+    "tags": ["langchain", "faiss"],
+    "details": {
+      "status": "completed",
+      "notes": "Load JSON, split chunks, build FAISS index, and answer with citations. Then used it to answer a question."
+    }
+  },
+  {
+    "id": 4,
+    "title": "RAG Pipeline",
+    "owner": "Charlie",
+    "tags": ["langchain", "faiss"],
+    "details": {
+      "status": "in_progress",
+      "notes": "Load JSON, split chunks, build FAISS index, and answer with citations. Then used it to answer a question."
+    }
+  },
+  {
+    "id": 5,
+    "title": "RAG Pipeline",
+    "owner": "David",
+    "tags": ["langchain", "faiss"],
+    "details": {
+      "status": "in_progress",
+      "notes": "Load JSON, split chunks, build FAISS index, and answer with citations. Then used it to answer a question. Then used it to answer a question."
+    }
+  }
+]
