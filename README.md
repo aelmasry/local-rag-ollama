@@ -114,14 +114,17 @@ docker compose exec ollama ollama pull nomic-embed-text
 - `GET /health`
   - Returns backend status, Ollama URL, configured models, available models.
 - `POST /upload`
-  - Accepts `multipart/form-data` with one or more files (`pdf`, `txt`, `json`).
-  - Saves files in `data/uploads/`, chunks + embeds + indexes into FAISS.
+  - Accepts `multipart/form-data` with one or more files (`pdf`, `txt`, `json`, `png`, `jpg`, `jpeg`).
+  - Detects file type, runs OCR for images, indexes all extracted text in FAISS.
+  - Detects document type (`id_card`, `invoice`, `general_document`) and stores structured data for known forms.
 - `POST /ask`
   - Accepts JSON body:
     - `{"question": "your question"}`
   - Returns:
     - `answer`
     - `retrieved_chunks`
+    - `document_type`
+    - `structured_data` (for ID/Invoice docs)
     - `k`
 
 ## One-command startup (bash)
@@ -130,6 +133,7 @@ From `rag-project`:
 
 ```bash
 ./run_all.sh          # start everything (default)
+./run_all_sh          # alias for run_all.sh
 ./start.sh            # same as ./run_all.sh
 ./run_all.sh stop     # stop API + UI only (Ollama keeps running)
 ./run_all.sh restart  # stop then start
@@ -171,6 +175,30 @@ flowchart LR
 - Text is extracted with **Tesseract** locally, cleaned, then chunked and embedded like other documents.
 - Backend logs include **raw** and **cleaned** OCR previews (`backend.ocr` logger).
 - For ID-like text, the model is instructed to add **Name / ID number / Expiry** when those fields appear in context.
+
+## Hybrid Decision Logic
+
+- Image upload: OCR -> classify -> optional structured extraction -> RAG index.
+- Document upload (PDF/TXT/JSON): parse text -> classify -> optional structured extraction -> RAG index.
+- Ask endpoint:
+  - if retrieved source is classified as `id_card` or `invoice`, answer uses structured data first (+ retrieved chunks returned);
+  - otherwise normal RAG answer flow is used.
+
+## Validation Scenarios
+
+Run:
+
+```bash
+python backend/validation_tests.py \
+  --cv-pdf /path/to/cv.pdf \
+  --id-image /path/to/id.jpg \
+  --invoice-file /path/to/invoice.pdf
+```
+
+Scenarios covered:
+- CV PDF + question: `what is my name`
+- ID image + question: `what is my id number`
+- Invoice + question: `what is total amount`
 
 ## CV Upload and Q&A
 

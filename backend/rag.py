@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+from typing import Any
 
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_community.vectorstores import FAISS
@@ -87,6 +88,18 @@ class RagService:
 
         raise ValueError(f"Unsupported file type: {suffix}")
 
+    def load_documents_for_file(self, file_path: Path) -> list[Document]:
+        return self._load_documents(file_path)
+
+    def _load_vectorstore(self) -> FAISS:
+        if not VECTORSTORE_DIR.exists():
+            raise FileNotFoundError("Vectorstore not found. Upload and index files first.")
+        return FAISS.load_local(
+            str(VECTORSTORE_DIR),
+            self.embeddings,
+            allow_dangerous_deserialization=True,
+        )
+
     @retry(attempts=3, delay_seconds=1.0)
     def ingest_files(self, file_paths: list[Path]) -> dict:
         all_docs: list[Document] = []
@@ -127,16 +140,18 @@ class RagService:
 
         VECTORSTORE_DIR.mkdir(parents=True, exist_ok=True)
         logger.info("embedding model=%s", EMBED_MODEL)
-        vectorstore = FAISS.from_documents(chunks, self.embeddings)
+        if (VECTORSTORE_DIR / "index.faiss").exists():
+            logger.info("vectorstore_existing path=%s", VECTORSTORE_DIR)
+            vectorstore = self._load_vectorstore()
+            vectorstore.add_documents(chunks)
+        else:
+            logger.info("vectorstore_create_new path=%s", VECTORSTORE_DIR)
+            vectorstore = FAISS.from_documents(chunks, self.embeddings)
         vectorstore.save_local(str(VECTORSTORE_DIR))
         logger.info("vectorstore_saved path=%s", VECTORSTORE_DIR)
         return {"documents": len(all_docs), "chunks": len(chunks)}
 
-    @retry(attempts=3, delay_seconds=1.0)
-    def ask(self, question: str) -> dict:
-        if not VECTORSTORE_DIR.exists():
-            raise FileNotFoundError("Vectorstore not found. Upload and index files first.")
-
+    def retrieve(self, question: str, k: int | None = None) -> dict[str, Any]:
         original_question = question.strip()
         retrieval_query, rewritten = rewrite_query_for_retrieval(original_question)
         if rewritten:
@@ -145,14 +160,10 @@ class RagService:
                 original_question,
                 retrieval_query,
             )
-
-        logger.info("retrieval question=%s", retrieval_query)
-        db = FAISS.load_local(
-            str(VECTORSTORE_DIR),
-            self.embeddings,
-            allow_dangerous_deserialization=True,
-        )
-        retriever = db.as_retriever(search_kwargs={"k": RETRIEVER_K})
+        search_k = k if k is not None else RETRIEVER_K
+        logger.info("retrieval question=%s k=%d", retrieval_query, search_k)
+        db = self._load_vectorstore()
+        retriever = db.as_retriever(search_kwargs={"k": search_k})
         docs = retriever.invoke(retrieval_query)
 
         # Normalize PDF-extracted text (often contains broken spaces/newlines).
@@ -161,10 +172,16 @@ class RagService:
             cleaned = re.sub(r"\s+", " ", doc.page_content).strip()
             doc.page_content = cleaned
             normalized_docs.append(doc)
-        docs = normalized_docs
+        return {
+            "original_question": original_question,
+            "retrieval_query": retrieval_query,
+            "query_rewritten": rewritten,
+            "docs": normalized_docs,
+            "k": search_k,
+        }
 
+    def answer_with_docs(self, original_question: str, docs: list[Document]) -> str:
         _log_retrieved_chunks(docs, label="debug")
-
         context = "\n\n---\n\n".join(doc.page_content for doc in docs)
         has_ocr = any(d.metadata.get("content_source") == "ocr_image" for d in docs)
         id_like = has_ocr or bool(
@@ -202,12 +219,21 @@ class RagService:
         logger.info("generation model=%s", LLM_MODEL)
         answer = self.llm.invoke(prompt)
         answer_text = answer.content if hasattr(answer, "content") else str(answer)
+        return answer_text
 
+    @retry(attempts=3, delay_seconds=1.0)
+    def ask(self, question: str) -> dict:
+        retrieved = self.retrieve(question)
+        docs: list[Document] = retrieved["docs"]
+        answer_text = self.answer_with_docs(
+            original_question=retrieved["original_question"],
+            docs=docs,
+        )
         return {
             "answer": answer_text,
-            "original_question": original_question,
-            "retrieval_query": retrieval_query,
-            "query_rewritten": rewritten,
+            "original_question": retrieved["original_question"],
+            "retrieval_query": retrieved["retrieval_query"],
+            "query_rewritten": retrieved["query_rewritten"],
             "retrieved_chunks": [
                 {
                     "metadata": doc.metadata,
@@ -215,5 +241,5 @@ class RagService:
                 }
                 for doc in docs
             ],
-            "k": RETRIEVER_K,
+            "k": retrieved["k"],
         }
