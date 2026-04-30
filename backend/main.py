@@ -9,10 +9,18 @@ from pydantic import BaseModel
 from backend.config import EMBED_MODEL, LLM_MODEL, OLLAMA_BASE_URL, UPLOAD_DIR
 from backend.document_ai import (
     ALLOWED_SUFFIXES,
+    DOC_TYPE_CV,
+    DOC_TYPE_GENERAL,
+    DOC_TYPE_ID,
+    DOC_TYPE_INVOICE,
     ProcessedDocument,
+    build_cv_qa_prompt,
+    build_general_qa_prompt,
+    build_structured_answer_prompt,
     detect_document_type,
     detect_file_type,
     extract_structured_data,
+    get_prompt_name,
     summarize_docs_for_classification,
 )
 from backend.ocr import tesseract_available
@@ -33,6 +41,8 @@ app.add_middleware(
 rag_service = RagService()
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 processed_documents: list[ProcessedDocument] = []
+structured_cache_by_file: dict[str, dict[str, str]] = {}
+doc_type_by_file: dict[str, str] = {}
 
 
 def _normalize_filename(name: str) -> str:
@@ -142,12 +152,21 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
             classification_text = summarize_docs_for_classification(docs)
             doc_type = detect_document_type(classification_text)
             structured_data = extract_structured_data(rag_service.llm, classification_text, doc_type)
+            doc_type_by_file[path.name] = doc_type
+            if structured_data is not None:
+                structured_cache_by_file[path.name] = structured_data
+            prompt_used = get_prompt_name(
+                doc_type,
+                "structured_extraction" if doc_type in {DOC_TYPE_ID, DOC_TYPE_INVOICE} else "rag_qa",
+            )
             logger.info(
-                "document_type_detected file=%s file_type=%s doc_type=%s ocr_preview=%s",
+                "document_type_detected file=%s file_type=%s doc_type=%s prompt_used=%s ocr_preview=%s output=%s",
                 path.name,
                 detect_file_type(path),
                 doc_type,
+                prompt_used,
                 re.sub(r"\s+", " ", classification_text[:250]),
+                structured_data,
             )
             processed_documents.append(
                 ProcessedDocument(
@@ -196,26 +215,31 @@ def ask(payload: AskRequest) -> dict:
                 d
                 for d in reversed(processed_documents)
                 if d.source_file in retrieved_files
-                and d.doc_type in {"id_card", "invoice"}
+                and d.doc_type in {DOC_TYPE_ID, DOC_TYPE_INVOICE}
                 and d.structured_data
             ),
             None,
         )
-        # Prefer structured extraction for known document forms.
-        if matched_structured and matched_structured.structured_data:
-            answer = rag_service.llm.invoke(
-                (
-                    "Answer the question using structured data first. If the field is missing, say not available.\n"
-                    f"Question: {question}\n"
-                    f"Document type: {matched_structured.doc_type}\n"
-                    f"Structured data: {matched_structured.structured_data}"
-                )
+        # Prefer cached structured extraction for known document forms.
+        if matched_structured:
+            cached_structured = structured_cache_by_file.get(matched_structured.source_file)
+        else:
+            cached_structured = None
+        if matched_structured and cached_structured:
+            prompt_name = get_prompt_name(matched_structured.doc_type, "qa_from_cached_json")
+            prompt = build_structured_answer_prompt(
+                question=question,
+                doc_type=matched_structured.doc_type,
+                structured_data=cached_structured,
             )
+            logger.info("ask_prompt_used prompt=%s file=%s", prompt_name, matched_structured.source_file)
+            answer = rag_service.llm.invoke(prompt)
             answer_text = answer.content if hasattr(answer, "content") else str(answer)
+            logger.info("ask_output mode=structured_plus_rag output=%s", answer_text[:500])
             return {
                 "mode": "structured_plus_rag",
                 "answer": answer_text,
-                "structured_data": matched_structured.structured_data,
+                "structured_data": cached_structured,
                 "document_type": matched_structured.doc_type,
                 "retrieved_chunks": [
                     {"metadata": d.metadata, "content": d.page_content[:1200]}
@@ -223,10 +247,27 @@ def ask(payload: AskRequest) -> dict:
                 ],
                 "k": retrieved["k"],
             }
-        answer_text = rag_service.answer_with_docs(
-            original_question=retrieved["original_question"],
-            docs=retrieved["docs"],
+        context = "\n\n---\n\n".join(d.page_content for d in retrieved["docs"])
+        retrieved_type = next(
+            (
+                doc_type_by_file.get(
+                    d.metadata.get("source_file") or Path(str(d.metadata.get("source", ""))).name,
+                    DOC_TYPE_GENERAL,
+                )
+                for d in retrieved["docs"]
+            ),
+            DOC_TYPE_GENERAL,
         )
+        if retrieved_type == DOC_TYPE_CV:
+            prompt_name = get_prompt_name(DOC_TYPE_CV, "rag_qa")
+            prompt = build_cv_qa_prompt(question=retrieved["original_question"], context=context)
+        else:
+            prompt_name = get_prompt_name(DOC_TYPE_GENERAL, "rag_qa")
+            prompt = build_general_qa_prompt(question=retrieved["original_question"], context=context)
+        logger.info("ask_prompt_used prompt=%s", prompt_name)
+        answer = rag_service.llm.invoke(prompt)
+        answer_text = answer.content if hasattr(answer, "content") else str(answer)
+        logger.info("ask_output mode=rag output=%s", answer_text[:500])
         return {
             "mode": "rag",
             "answer": answer_text,
@@ -238,7 +279,7 @@ def ask(payload: AskRequest) -> dict:
                 for d in retrieved["docs"]
             ],
             "structured_data": None,
-            "document_type": "general_document",
+            "document_type": retrieved_type,
             "k": retrieved["k"],
         }
     except Exception as exc:  # noqa: BLE001
