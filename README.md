@@ -7,6 +7,17 @@ Production-ready local RAG stack:
 - LLM/Embeddings: Ollama (`llama3`, `nomic-embed-text`)
 - Vector DB: FAISS (local persisted index)
 
+## Key Features
+
+- Fully local and self-hosted RAG flow (no external LLM API required).
+- Multi-format ingestion: `PDF`, `TXT`, `JSON`, and images (`PNG`/`JPG`/`JPEG`) via local OCR.
+- Hybrid answer strategy:
+  - Structured extraction for known forms (`id_card`, `invoice`).
+  - Standard semantic retrieval + generation for general documents.
+- Persistent FAISS index for faster repeated Q&A after upload.
+- FastAPI backend + Streamlit UI with clear, practical local setup steps.
+- Debug-friendly outputs (`retrieved_chunks`, prompt mode, OCR/ingestion logs).
+
 **Default API port is `8010`**, not `8000`. If you open `http://localhost:8000/docs` and see an HTML **404 Not Found** page (often Laravel/PHP), that port is a different app — use `http://localhost:8010/docs` for this RAG API.
 
 ## Project Layout
@@ -236,3 +247,9 @@ Notes:
   - `/tmp/rag_ollama.log`
   - `/tmp/rag_backend.log`
   - `/tmp/rag_ui.log`
+
+## Author
+
+- Name: Ali Salem
+- Email: admin@alisalem.me
+- Website: https://alisalem.me

@@ -1,3 +1,10 @@
+"""Core retrieval and generation service for local RAG.
+
+Author: Ali Salem
+Email: admin@alisalem.me
+Website: https://alisalem.me
+"""
+
 from pathlib import Path
 import re
 from typing import Any
@@ -56,6 +63,7 @@ def _log_retrieved_chunks(docs: list, label: str = "retrieval") -> None:
 
 class RagService:
     def __init__(self) -> None:
+        # Keep model wiring in one place for easier swaps.
         self.embeddings = OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
         self.llm = ChatOllama(model=LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
         self.splitter = RecursiveCharacterTextSplitter(
@@ -107,6 +115,8 @@ class RagService:
             file_docs = self._load_documents(path)
             if not file_docs:
                 continue
+            # Add a high-priority document-header chunk to improve retrieval
+            # for profile-style questions (for example, "what is my name?").
             full_text = "\n".join(d.page_content for d in file_docs)
             normalized = re.sub(r"\s+", " ", full_text).strip()
             head = normalized[:DOCUMENT_HEADER_CHAR_LIMIT]
@@ -153,6 +163,7 @@ class RagService:
 
     def retrieve(self, question: str, k: int | None = None) -> dict[str, Any]:
         original_question = question.strip()
+        # Query rewriting boosts retrieval recall for vague CV questions.
         retrieval_query, rewritten = rewrite_query_for_retrieval(original_question)
         if rewritten:
             logger.info(

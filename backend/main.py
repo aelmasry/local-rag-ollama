@@ -1,3 +1,10 @@
+"""FastAPI entrypoint for the local RAG system.
+
+Author: Ali Salem
+Email: admin@alisalem.me
+Website: https://alisalem.me
+"""
+
 from pathlib import Path
 import re
 
@@ -120,6 +127,8 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
     saved_paths: list[Path] = []
     try:
         for uploaded in files:
+            # Normalize extension/type from filename, MIME, and magic bytes
+            # so uploads still work when clients send unusual filenames.
             content = await uploaded.read()
             raw_name = uploaded.filename or "uploaded_file"
             suffix = _detect_suffix(raw_name, content, uploaded.content_type)
@@ -146,6 +155,7 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
                 detect_file_type(save_path),
             )
 
+        # Ingest once after all files are safely persisted on disk.
         ingest_stats = rag_service.ingest_files(saved_paths)
         for path in saved_paths:
             docs = rag_service.load_documents_for_file(path)
@@ -210,6 +220,8 @@ def ask(payload: AskRequest) -> dict:
             (d.metadata.get("source_file") or Path(str(d.metadata.get("source", ""))).name)
             for d in retrieved["docs"]
         }
+        # If retrieval matches a known structured form (ID/invoice),
+        # prefer deterministic field-based answering first.
         matched_structured = next(
             (
                 d
@@ -247,6 +259,7 @@ def ask(payload: AskRequest) -> dict:
                 ],
                 "k": retrieved["k"],
             }
+        # Fallback: standard RAG answer over retrieved context chunks.
         context = "\n\n---\n\n".join(d.page_content for d in retrieved["docs"])
         retrieved_type = next(
             (
